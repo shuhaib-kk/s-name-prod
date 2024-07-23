@@ -1,0 +1,71 @@
+name: "CI"
+
+"on":
+  pull_request:
+  push: { branches: [main] }
+
+concurrency:
+  group: ci-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  ENV_NAME: ci-env
+  AWS_REGION: "ap-south-1"
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID_SRE_TERRAFORM_HUB }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY_SRE_TERRAFORM_HUB }}
+  TERRAFORM_STATE_BUCKET: "sre-terraform-central-state-bucket"
+  TERRAFORM_STATE_FOLDER: "${{ github.event.repository.name }}/ci-env"
+
+jobs:
+  checkterraform:
+    runs-on: aws-ec2
+    steps:
+      - uses: actions/checkout@v2
+      - uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.6.4
+
+      - name: Setup 
+        working-directory: ./app
+        run: ls -lart
+
+      - name: Terraform fmt
+        working-directory: ./app
+        id: fmt
+        run: terraform fmt -check
+        continue-on-error: true
+
+      - name: Install SSH Key
+        uses: shimataro/ssh-key-action@v2.6.1
+        with:
+          key: ${{ secrets.SRE_TERRAFORM_MODULES_GIT_READ_KEY }} 
+          known_hosts: unnecessary
+          if_key_exists: ignore
+
+      - name: Terraform Init
+        working-directory: ./app
+        id: init
+        run: |
+          terraform init -backend=true -backend-config="bucket=${{ env.TERRAFORM_STATE_BUCKET }}" -backend-config="key=${{ env.TERRAFORM_STATE_FOLDER }}" -reconfigure
+
+      - name: Terraform Plan
+        working-directory: ./app
+        id: plan
+        run: terraform plan -input=false -var-file ../ci.tfvars -var env=${{ env.ENV_NAME }} -out=app.plan
+
+      - run: echo ${{ steps.plan.outputs.exitcode }}
+
+      - name: Terraform apply
+        working-directory: ./app
+        id: apply
+        run: terraform apply -auto-approve -var-file ../ci.tfvars -var env=${{ env.ENV_NAME }}
+      
+      - name: Terraform plan destroy
+        working-directory: ./app
+        id: plan-destroy
+        run: terraform plan -destroy -var-file ../ci.tfvars -var env=${{ env.ENV_NAME }} -out=destroy.plan -input=false
+
+      - name: Terraform apply destroy
+        working-directory: ./app
+        id: apply-destroy
+        run: terraform apply -destroy -auto-approve -var-file ../ci.tfvars -var env=${{ env.ENV_NAME }}

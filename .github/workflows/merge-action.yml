@@ -1,0 +1,23 @@
+name: "Merge Action"
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  increment-version:
+    name: "Increment the github tag version"
+    runs-on: aws-ec2
+    steps:
+      - name: Clone Self
+        uses: actions/checkout@v2
+      - name: Get changed files
+        id: changes
+        # Set outputs using the command.
+        run: |
+          set -x
+          git fetch --tags
+          previous_tag=$(git tag -l --sort=-v:refname '[0-9]*' | head -1)
+          new_tag=$((previous_tag + 1))
+          git tag $new_tag && git push origin $new_tag
